@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN" "http://www.freedesktop.org/standards/PolicyKit/1.0/policyconfig.dtd">
 <policyconfig>
-  <vendor/>
-  <vendor_url/>
   <icon_name>stock_person</icon_name>
   <action id="org.freedesktop.accounts.change-own-user-data">
     <description gettext-domain="accounts-service">Change your own user data</description>
