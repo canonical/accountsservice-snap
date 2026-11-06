@@ -1,5 +1,5 @@
 name: accountsservice
-base: core26
+base: core26-desktop
 adopt-info: accountsservice
 summary: AccountsService D-Bus system daemon as a provider snap
 description: |
@@ -13,6 +13,12 @@ description: |
   `accountsservice` interface (extrausers rw, host helper execs, peer-less
   dbus receive rules); clients connect through that interface's plug or the
   built-in account-control plug.
+
+  base is core26-desktop, not core26: the daemon execs its helpers at their
+  compiled-in absolute paths (/usr/sbin/adduser, /usr/sbin/chpasswd, ...),
+  and a snap app's /usr is its BASE rootfs — the stock core26 base carries
+  no adduser/perl/patched-chpasswd, while the desktop variant rootfs has
+  the exact helper set the fat base used.
 
 grade: stable
 confinement: strict
