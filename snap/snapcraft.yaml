@@ -1,0 +1,80 @@
+name: accountsservice
+base: core26
+adopt-info: accountsservice
+summary: AccountsService D-Bus system daemon as a provider snap
+description: |
+  The AccountsService system daemon (org.freedesktop.Accounts) packaged as
+  a provider snap for Ubuntu Core Desktop. Staged from the same resolute
+  accountsservice build the fat base shipped (PPA build with extrausers
+  support: the daemon edits /var/lib/extrausers directly and execs the
+  host's adduser/chpasswd helpers).
+
+  The daemon is strictly confined: its slot policy lives in the snapd fork's
+  `accountsservice` interface (extrausers rw, host helper execs, peer-less
+  dbus receive rules); clients connect through that interface's plug or the
+  built-in account-control plug.
+
+grade: stable
+confinement: strict
+
+slots:
+  # Activation + name ownership: snapd writes the
+  # /var/lib/snapd/dbus-1/system-services entry and the /etc/dbus-1/system.d
+  # conf (root may own org.freedesktop.Accounts) for this slot; the app
+  # activates on it.
+  accounts-dbus:
+    interface: dbus
+    bus: system
+    name: org.freedesktop.Accounts
+  # Interface-specific policy slot (extrausers/helpers/dbus receive), defined
+  # in the snapd fork.
+  accountsservice:
+    interface: accountsservice
+
+plugs:
+  # polkit authorization for the daemon's privileged operations; the action
+  # XML is delivered to /usr/share/polkit-1/actions on connection.
+  polkit:
+    action-prefix: org.freedesktop.accounts
+
+apps:
+  accounts-daemon:
+    command: usr/libexec/accounts-daemon
+    daemon: dbus
+    daemon-scope: system
+    activates-on:
+      - accounts-dbus
+    plugs:
+      - polkit
+    slots:
+      - accountsservice
+
+layout:
+  # The daemon resolves its compiled-in /usr/share/accountsservice path for
+  # user-templates and interfaces/; those files ship inside this snap.
+  /usr/share/accountsservice:
+    bind: $SNAP/usr/share/accountsservice
+
+parts:
+  accountsservice:
+    plugin: nil
+    stage-packages:
+      - accountsservice
+      - libnss-extrausers
+    override-build: |
+      craftctl default
+      deb_dir="/root/parts/accountsservice/stage_packages"
+      craftctl set version="$(dpkg-deb -f "$deb_dir"/accountsservice_*.deb Version)"
+    stage:
+      - -usr/share/doc
+      - -usr/share/man
+      - -usr/share/lintian
+
+  policy:
+    plugin: nil
+    after:
+      - accountsservice
+    override-build: |
+      install -Dm644 \
+        "${CRAFT_PROJECT_DIR}/polkit/org.freedesktop.accounts.policy" \
+        "${CRAFT_PART_INSTALL}/meta/polkit/polkit.org.freedesktop.accounts.policy"
