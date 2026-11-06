@@ -54,6 +54,17 @@ layout:
   # user-templates and interfaces/; those files ship inside this snap.
   /usr/share/accountsservice:
     bind: $SNAP/usr/share/accountsservice
+  # The daemon keeps its state (cached user metadata, face icons) at its
+  # compiled-in /var/lib/AccountsService path. That path cannot be served
+  # from the host: snap-confine builds snap mount namespaces from the base
+  # rootfs plus a fixed whitelist of host mounts, and /var/lib/AccountsService
+  # is neither in the base nor on the whitelist (binding a host mount whose
+  # mountpoint is absent from the base tree aborts snap-confine). Bind the
+  # snap's own writable $SNAP_COMMON there instead; the fstab-seeded host
+  # /var/lib/AccountsService on the desktop variant stays as inert factory
+  # seeding for anything outside the snap.
+  /var/lib/AccountsService:
+    bind: $SNAP_COMMON
 
 parts:
   accountsservice:
