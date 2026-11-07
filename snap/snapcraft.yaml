@@ -71,6 +71,22 @@ layout:
   # seeding for anything outside the snap.
   /var/lib/AccountsService:
     bind: $SNAP_COMMON
+  # SetPassword record-injection guard: the daemon execs its compiled-in
+  # /usr/sbin/chpasswd and pipes one "user:crypt\n" record to it without
+  # validating the caller-supplied crypt for record separators, so a crypt of
+  # "hash\notheruser:otherhash" would make chpasswd change a second
+  # extrausers account in the same authorized call. Bind the validating guard
+  # (chpasswd/chpasswd-guard.c) over that path in the daemon's namespace: it
+  # accepts exactly one username:$6$salt$hash record, rejects anything else
+  # with exit 2 (the daemon surfaces chpasswd failures), then execs the snap's
+  # byte-identical copy of the base's 1017-patched chpasswd
+  # (usr/sbin/chpasswd.real), so the extrausers fallback chain is unchanged.
+  # No policy change needed: the fork's slot rule `/{,usr/}sbin/chpasswd ixr`
+  # covers the guard exec (AppArmor mediates on the namespace path), and the
+  # base template's exec grant on the snap's own install dir covers
+  # chpasswd.real.
+  /usr/sbin/chpasswd:
+    bind-file: $SNAP/usr/sbin/chpasswd
 
 parts:
   accountsservice:
@@ -95,3 +111,27 @@ parts:
       install -Dm644 \
         "${CRAFT_PROJECT_DIR}/polkit/org.freedesktop.accounts.policy" \
         "${CRAFT_PART_INSTALL}/meta/polkit/polkit.org.freedesktop.accounts.policy"
+
+  chpasswd-guard:
+    plugin: nil
+    build-packages:
+      - gcc
+      - libc6-dev
+    override-build: |
+      # chpasswd.real must be the fat base's 1017 extrausers-fallback chpasswd
+      # (the same binary the variant rootfs bakes at
+      # variants/desktop/static/usr/sbin/chpasswd); refuse to pack anything
+      # else — a stock chpasswd would break SetPassword on the RO base.
+      expected=91b60d39a7ff16ce2fa2a34da7440ff6
+      actual="$(md5sum "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd.real" | cut -d' ' -f1)"
+      if [ "$actual" != "$expected" ]; then
+        echo "chpasswd.real md5 $actual != expected $expected" \
+             "(1017-patched chpasswd required)" >&2
+        exit 1
+      fi
+      mkdir -p "${CRAFT_PART_INSTALL}/usr/sbin"
+      cc -O2 -Wall -Wextra \
+        -o "${CRAFT_PART_INSTALL}/usr/sbin/chpasswd" \
+        "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd-guard.c"
+      install -Dm755 "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd.real" \
+        "${CRAFT_PART_INSTALL}/usr/sbin/chpasswd.real"
