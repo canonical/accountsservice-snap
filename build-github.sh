@@ -21,14 +21,6 @@ set -euo pipefail
 
 rm -f ./*.snap
 
-# Prove the vendored 1017-patched chpasswd for THIS runner's architecture
-# actually executes natively before packing it (an amd64 ELF on the arm64
-# runner would fail with an exec-format error, and vice versa).
-real="chpasswd/chpasswd.real"
-[ "$(dpkg --print-architecture)" = arm64 ] && real="chpasswd/chpasswd.real-arm64"
-"$real" --help >/dev/null
-echo "vendored chpasswd.real smoke test ok: $real"
-
 sed -i 's/^base: core26-desktop$/base: core26/' snap/snapcraft.yaml
 restore_base() {
     sed -i -e 's/^base: core26$/base: core26-desktop/' \

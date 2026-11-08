@@ -270,3 +270,13 @@ parts:
         "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd-guard.c"
       install -Dm755 "${CRAFT_PROJECT_DIR}/chpasswd/$real" \
         "${CRAFT_PART_INSTALL}/usr/sbin/chpasswd.real"
+      # Smoke-run the vendored chpasswd.real inside the build instance: it
+      # must execute natively on this architecture against the core26
+      # build-base's runtime (the same resolute glibc/libpam/libaudit/
+      # libselinux/libcrypt closure the desktop-variant rootfs serves at
+      # runtime). An arch or closure mismatch fails the build loudly here
+      # instead of as a broken SetPassword on the image. (It cannot run on
+      # the CI runner host: the hosted arm64 runner is 24.04 and its older
+      # glibc lacks the GLIBC_2.43 symbol versions the resolute build
+      # requires — same requirement the amd64 deb binary carries.)
+      "${CRAFT_PART_INSTALL}/usr/sbin/chpasswd.real" --help >/dev/null
