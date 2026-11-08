@@ -2,10 +2,53 @@
 
 AccountsService (org.freedesktop.Accounts) system D-Bus daemon as a
 provider snap for Ubuntu Core Desktop. Staged from the resolute
-`accountsservice` deb; base core26. Companion to the snapd fork's
+`accountsservice` deb; base core26-desktop. Companion to the snapd fork's
 `accountsservice` interface (slot policy) and the gnome gadget's static
 connections. Build with `./go-build` (runs snapcraft pack as the copilot
 build user).
+
+## CreateUser helpers: adduser + perl-base (staged here, not in the base)
+
+The daemon execs its compiled-in `/usr/sbin/adduser` for CreateUser — a
+perl script — plus `/usr/sbin/usermod` for group membership. The base
+(core26-desktop) does not carry adduser/perl: the base must not ship perl;
+dependencies belong to the consumer and are staged as proper archive debs:
+
+- `adduser` + `perl-base` via stage-packages (adduser needs nothing beyond
+  perl-base: Fcntl/Getopt::Long/parent/Exporter ship in perl-base, and the
+  `Debian::Adduser*.pm` modules ship inside the adduser deb itself).
+- `patches/adduser-extrausers-usermod.patch` is applied at build time to
+  the staged archive adduser. This is exactly the patch the fat base
+  carried (byte-checked: the patched result must md5-match the fat-chain
+  script `430f8d1d23c460e795eb7181c4503365`); it comes from the Ubuntu
+  Core Desktop adduser work (the local ucd-ppa repo's
+  adduser 3.153ubuntu1+ucd1 build took a different, stricter approach —
+  not what the fat base shipped). The archive deb needs it in
+  USE_EXTRAUSERS mode:
+  1. AddUserToGroup would exec `usermod --extrausers`, but usermod has no
+     such flag (usage text, exit 2); plain usermod is correct because the
+     archive shadow build is extrausers-aware on its own.
+  2. `ch_comment` would `log_fatal` in extrausers mode — and the daemon
+     always passes `--gecos <fullname>`, so this runs on EVERY CreateUser;
+     refusing silently dropped the real name set by the first-boot wizard.
+- `conf/adduser.conf` (the live-validated fat-base config) ships at
+  `etc/adduser.conf` in the snap: the daemon execs adduser WITHOUT
+  `--extrausers` (compiled-in argv: `adduser --quiet --disabled-password
+  --gecos <fullname> <name>`), so `USE_EXTRAUSERS=1` in the config is what
+  routes accounts into `/var/lib/extrausers`. The deb's stock config (no
+  USE_EXTRAUSERS) is excluded from staging.
+- Layouts serve all of it at the daemon's compiled-in absolute paths
+  inside its mount namespace (`/usr/sbin/adduser`, `/usr/bin/perl`,
+  `/usr/lib/x86_64-linux-gnu/perl-base`, `/usr/share/perl5`,
+  `/etc/adduser.conf` — bind-file/bind layouts; snap-update-ns creates
+  missing mountpoints, including files, over the read-only base).
+  Paths stay identical to what the fork's slot policy grants, so no
+  snapd policy change was needed.
+- `usermod` and `chpasswd` still resolve from the variant base: the base
+  bakes the 1017 extrausers-fallback chpasswd (also mirrored in-snap as
+  the guarded `chpasswd.real`), and the archive usermod is
+  extrausers-aware (it edits `/var/lib/extrausers/{passwd,group}` for
+  extrausers users).
 
 ## SetPassword chpasswd guard
 

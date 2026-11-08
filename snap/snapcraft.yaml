@@ -14,11 +14,16 @@ description: |
   dbus receive rules); clients connect through that interface's plug or the
   built-in account-control plug.
 
-  base is core26-desktop, not core26: the daemon execs its helpers at their
-  compiled-in absolute paths (/usr/sbin/adduser, /usr/sbin/chpasswd, ...),
-  and a snap app's /usr is its BASE rootfs — the stock core26 base carries
-  no adduser/perl/patched-chpasswd, while the desktop variant rootfs has
-  the exact helper set the fat base used.
+  The daemon's user-management helpers are staged here (proper archive
+  debs, not vendored files): the daemon execs its compiled-in absolute
+  helper paths (/usr/sbin/adduser, /usr/sbin/chpasswd, /usr/sbin/usermod,
+  ...), and a snap app's /usr is its BASE rootfs — the desktop-variant
+  base carries no adduser/perl (they belong to the consumer), so the
+  layouts below serve the snap-staged helpers at the daemon's compiled-in
+  paths inside its namespace. /usr/sbin/chpasswd and /usr/sbin/usermod
+  still resolve from the variant base (chpasswd: the base bakes the
+  1017 extrausers-fallback build; usermod: the archive shadow build is
+  extrausers-aware).
 
 grade: stable
 confinement: strict
@@ -87,6 +92,30 @@ layout:
   # chpasswd.real.
   /usr/sbin/chpasswd:
     bind-file: $SNAP/usr/sbin/chpasswd
+  # CreateUser: the daemon execs its compiled-in /usr/sbin/adduser (a perl
+  # script). Stage the archive adduser + perl-base debs and serve them at
+  # the compiled-in paths (bind-file keeps the namespace path identical to
+  # what the fork's slot policy grants: `/usr/sbin/adduser ixr`,
+  # `/usr/bin/perl ixr`, `/usr/share/perl{,5}/** r`, `/etc/adduser.conf r`;
+  # the perl-base modules under /usr/lib/.../perl-base are covered by the
+  # base template's library read grant, as proven while adduser came from
+  # the base). snap-update-ns creates missing file mountpoints (MkfileAll +
+  # writable mimic), so binding over paths the base does not carry is safe.
+  /usr/sbin/adduser:
+    bind-file: $SNAP/usr/sbin/adduser
+  /usr/bin/perl:
+    bind-file: $SNAP/usr/bin/perl
+  /usr/lib/x86_64-linux-gnu/perl-base:
+    bind: $SNAP/usr/lib/x86_64-linux-gnu/perl-base
+  /usr/share/perl5:
+    bind: $SNAP/usr/share/perl5
+  # adduser reads /etc/adduser.conf for the extrausers switch; the daemon
+  # does not pass --extrausers on the command line (compiled-in argv is
+  # "adduser --quiet --disabled-password --gecos <fullname> <name>"), so
+  # USE_EXTRAUSERS=1 in the config is what routes accounts into
+  # /var/lib/extrausers. The base no longer ships a config file.
+  /etc/adduser.conf:
+    bind-file: $SNAP/etc/adduser.conf
 
 parts:
   accountsservice:
@@ -94,14 +123,62 @@ parts:
     stage-packages:
       - accountsservice
       - libnss-extrausers
+      # The daemon's CreateUser helper and its perl runtime, staged as
+      # proper archive debs (the base no longer carries them — the base
+      # must not ship perl; dependencies belong to the consumer snap).
+      # adduser needs only perl-base (all the modules it uses — Fcntl,
+      # Getopt::Long, parent, Exporter — ship in perl-base; its
+      # Debian::Adduser*.pm ship inside the adduser deb itself).
+      - adduser
+      - perl-base
     override-build: |
       craftctl default
       deb_dir="/root/parts/accountsservice/stage_packages"
       craftctl set version="$(dpkg-deb -f "$deb_dir"/accountsservice_*.deb Version)"
+      # The archive adduser deb needs one small patch to work in
+      # USE_EXTRAUSERS mode. Provenance: this is exactly the patch the fat
+      # base carried (md5 430f8d1d23c460e795eb7181c4503365) and which the
+      # desktop variant baked at variants/desktop/static/usr/sbin/adduser
+      # until the payload moved here; it originates from the Ubuntu Core
+      # Desktop adduser work (the ucd-ppa adduser 3.153ubuntu1+ucd1 build
+      # took a different, stricter approach that was NOT what the fat base
+      # shipped). Two hunks, both validated live on the desktop image:
+      # 1. AddUserToGroup: the archive script passes --extrausers to
+      #    usermod, but usermod has no such flag (usage text, exit 2) —
+      #    the archive shadow build is extrausers-aware on its own and
+      #    edits /var/lib/extrausers/group for extrausers users, so plain
+      #    usermod is correct.
+      # 2. ch_comment (the daemon ALWAYS passes --gecos to adduser, so
+      #    this runs on every CreateUser): the archive script log_fatals
+      #    in extrausers mode, which would fail/cripple every CreateUser
+      #    ("refusing here silently dropped the real name set by the
+      #    first-boot wizard") — plain usermod -c is correct for the same
+      #    reason as hunk 1.
+      # Guards (same policy as the chpasswd.real guard below): refuse to
+      # pack if the staged adduser is not the archive build we patched
+      # against, and refuse if the patched result is not byte-identical
+      # to the live-validated fat-chain script.
+      staged_md5="$(md5sum "$CRAFT_PART_INSTALL/usr/sbin/adduser" | cut -d' ' -f1)"
+      if [ "$staged_md5" != "8eb21b6d428cd5c78ab6667bdd46284e" ]; then
+        echo "staged adduser md5 $staged_md5 != expected 8eb21b6d428cd5c78ab6667bdd46284e" \
+             "(archive adduser 3.153ubuntu1 — re-validate the patch below)" >&2
+        exit 1
+      fi
+      patch -d "$CRAFT_PART_INSTALL" -p1 \
+        < "${CRAFT_PROJECT_DIR}/patches/adduser-extrausers-usermod.patch"
+      patched_md5="$(md5sum "$CRAFT_PART_INSTALL/usr/sbin/adduser" | cut -d' ' -f1)"
+      if [ "$patched_md5" != "430f8d1d23c460e795eb7181c4503365" ]; then
+        echo "patched adduser md5 $patched_md5 != expected 430f8d1d23c460e795eb7181c4503365" \
+             "(the live-validated fat-chain adduser)" >&2
+        exit 1
+      fi
     stage:
       - -usr/share/doc
       - -usr/share/man
       - -usr/share/lintian
+      # The deb's stock /etc/adduser.conf has no USE_EXTRAUSERS setting;
+      # the snap ships the live-validated config via the adduser-conf part.
+      - -etc/adduser.conf
 
   policy:
     plugin: nil
@@ -111,6 +188,18 @@ parts:
       install -Dm644 \
         "${CRAFT_PROJECT_DIR}/polkit/org.freedesktop.accounts.policy" \
         "${CRAFT_PART_INSTALL}/meta/polkit/polkit.org.freedesktop.accounts.policy"
+
+  # adduser's extrausers switch: the daemon execs adduser without
+  # --extrausers and relies on the config file's USE_EXTRAUSERS=1 to route
+  # account creation into /var/lib/extrausers. This is the live-validated
+  # config the fat base shipped (served into the daemon's namespace by the
+  # /etc/adduser.conf layout bind-file). The accountsservice part excludes
+  # the deb's stock config (no USE_EXTRAUSERS there).
+  adduser-conf:
+    plugin: nil
+    override-build: |
+      install -Dm644 "${CRAFT_PROJECT_DIR}/conf/adduser.conf" \
+        "${CRAFT_PART_INSTALL}/etc/adduser.conf"
 
   chpasswd-guard:
     plugin: nil
