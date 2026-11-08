@@ -182,6 +182,11 @@ parts:
 
   policy:
     plugin: nil
+    # source: fingerprinted input — snapcraft skips 'already ran' builds
+    # when it cannot see the part's real inputs (CRAFT_PROJECT_DIR reads
+    # are invisible to the lifecycle otherwise; this bit us as a stale
+    # guard binary shipped in a 'successful' build).
+    source: polkit
     after:
       - accountsservice
     override-build: |
@@ -197,12 +202,14 @@ parts:
   # the deb's stock config (no USE_EXTRAUSERS there).
   adduser-conf:
     plugin: nil
+    source: conf
     override-build: |
       install -Dm644 "${CRAFT_PROJECT_DIR}/conf/adduser.conf" \
         "${CRAFT_PART_INSTALL}/etc/adduser.conf"
 
   chpasswd-guard:
     plugin: nil
+    source: chpasswd
     build-packages:
       - gcc
       - libc6-dev
