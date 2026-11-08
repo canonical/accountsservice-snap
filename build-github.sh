@@ -14,9 +14,20 @@
 # snapcraft's schema validation rejects 'core26-desktop' as a base name,
 # so the placeholder swap is required (same recipe as
 # plasma-desktop-session's build-github.sh).
+#
+# SUFFIX (set by the workflow matrix) is appended to the published asset
+# name ("" on amd64, "-arm64" on the arm64 leg).
 set -euo pipefail
 
 rm -f ./*.snap
+
+# Prove the vendored 1017-patched chpasswd for THIS runner's architecture
+# actually executes natively before packing it (an amd64 ELF on the arm64
+# runner would fail with an exec-format error, and vice versa).
+real="chpasswd/chpasswd.real"
+[ "$(dpkg --print-architecture)" = arm64 ] && real="chpasswd/chpasswd.real-arm64"
+"$real" --help >/dev/null
+echo "vendored chpasswd.real smoke test ok: $real"
 
 sed -i 's/^base: core26-desktop$/base: core26/' snap/snapcraft.yaml
 restore_base() {
@@ -50,4 +61,4 @@ sed -i 's/^base: core26$/base: core26-desktop/' "$tmp/squashfs-root/meta/snap.ya
 mksquashfs "$tmp/squashfs-root" "$built" -noappend -comp xz -no-progress -xattrs
 rm -rf "$tmp"
 
-cp -f "$built" accountsservice.snap
+cp -f "$built" "accountsservice${SUFFIX:-}.snap"

@@ -11,7 +11,15 @@ permissions:
 
 jobs:
   snap:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            suffix: ""
+          - runner: ubuntu-24.04-arm
+            suffix: "-arm64"
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - name: Install build dependencies
@@ -27,6 +35,8 @@ jobs:
           # build instance) - see snapcore/action-build ensureLXDNetwork.
           sudo iptables -P FORWARD ACCEPT
       - name: Build accountsservice snap
+        env:
+          SUFFIX: ${{ matrix.suffix }}
         run: |
           sudo snap install snapcraft --classic --channel=edge
           # Re-exec with fresh group membership so snapcraft can talk to
@@ -41,10 +51,10 @@ jobs:
             || gh release create desktop-26-latest -R "$GITHUB_REPOSITORY" \
                  --title "desktop/26 latest snap" \
                  --notes "Rolling latest main snap build; assets are replaced on every green build."
-          gh release upload desktop-26-latest accountsservice.snap -R "$GITHUB_REPOSITORY" --clobber
+          gh release upload desktop-26-latest "accountsservice${{ matrix.suffix }}.snap" -R "$GITHUB_REPOSITORY" --clobber
       - uses: actions/upload-artifact@v4
         with:
-          name: snap
-          path: accountsservice.snap
+          name: snap${{ matrix.suffix }}
+          path: "accountsservice${{ matrix.suffix }}.snap"
           compression-level: 0
           retention-days: 14

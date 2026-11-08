@@ -85,7 +85,9 @@ layout:
   # accepts exactly one username:$<scheme>$salt$hash record (any modular-crypt scheme), rejects anything else
   # with exit 2 (the daemon surfaces chpasswd failures), then execs the snap's
   # byte-identical copy of the base's 1017-patched chpasswd
-  # (usr/sbin/chpasswd.real), so the extrausers fallback chain is unchanged.
+  # (usr/sbin/chpasswd.real — the per-arch build of the same patched source;
+  # see the chpasswd-guard part below), so the extrausers fallback chain is
+  # unchanged on every architecture.
   # No policy change needed: the fork's slot rule `/{,usr/}sbin/chpasswd ixr`
   # covers the guard exec (AppArmor mediates on the namespace path), and the
   # base template's exec grant on the snap's own install dir covers
@@ -105,8 +107,12 @@ layout:
     bind-file: $SNAP/usr/sbin/adduser
   /usr/bin/perl:
     bind-file: $SNAP/usr/bin/perl
-  /usr/lib/x86_64-linux-gnu/perl-base:
-    bind: $SNAP/usr/lib/x86_64-linux-gnu/perl-base
+  # $SNAP/usr/lib/<triplet>/perl-base: the triplet is the build arch's own
+  # (perl's compiled-in @INC names the triplet dir), so the variable form is
+  # required — snapcraft expands $CRAFT_ARCH_TRIPLET_BUILD_FOR in layouts at
+  # pack time (x86_64-linux-gnu on amd64, aarch64-linux-gnu on arm64).
+  /usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/perl-base:
+    bind: $SNAP/usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR/perl-base
   /usr/share/perl5:
     bind: $SNAP/usr/share/perl5
   # adduser reads /etc/adduser.conf for the extrausers switch; the daemon
@@ -218,16 +224,49 @@ parts:
       # (the same binary the variant rootfs bakes at
       # variants/desktop/static/usr/sbin/chpasswd); refuse to pack anything
       # else — a stock chpasswd would break SetPassword on the RO base.
-      expected=91b60d39a7ff16ce2fa2a34da7440ff6
-      actual="$(md5sum "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd.real" | cut -d' ' -f1)"
+      #
+      # The 1017 patch is arch-independent C (chpasswd.c: on failure to lock
+      # /etc/passwd — read-only on the image — fall back to the
+      # /var/lib/extrausers/{passwd,shadow} db when it exists), but the ELF
+      # is arch-specific, so each architecture ships its own build of the
+      # same patched source:
+      # - amd64: the ucd-ppa passwd_4.17.4-2ubuntu3+ucd1 deb output (the
+      #   byte-identical fat-chain binary, md5 91b60d39a7ff16ce2fa2a34da7440ff6).
+      # - arm64: cross-built from the same ucd-ppa source tree (resolute
+      #   shadow 4.17.4 + the debian patch series + 1017) with
+      #   aarch64-linux-gnu-gcc against resolute arm64 debs, configured with
+      #   the deb's flags (--with-libpam --with-yescrypt --with-audit
+      #   --with-selinux ...), LTO + dpkg-buildflags, --as-needed-symbol
+      #   resolution matching the deb (arc4random_buf/reallocarray from
+      #   glibc >= 2.36, NOT libbsd — libbsd is not in the runtime base).
+      #   Verified end-to-end under qemu-user: /etc lock failure (RO base)
+      #   -> 1017 fallback -> password written to
+      #   /var/lib/extrausers/shadow, /etc/shadow untouched.
+      #   md5 c459c70501c6e2e403491f2f48d7dfb3.
+      arch="$(dpkg --print-architecture)"
+      case "$arch" in
+        amd64)
+          expected=91b60d39a7ff16ce2fa2a34da7440ff6
+          real="chpasswd.real"
+          ;;
+        arm64)
+          expected=c459c70501c6e2e403491f2f48d7dfb3
+          real="chpasswd.real-arm64"
+          ;;
+        *)
+          echo "unsupported build architecture: $arch" >&2
+          exit 1
+          ;;
+      esac
+      actual="$(md5sum "${CRAFT_PROJECT_DIR}/chpasswd/$real" | cut -d' ' -f1)"
       if [ "$actual" != "$expected" ]; then
-        echo "chpasswd.real md5 $actual != expected $expected" \
-             "(1017-patched chpasswd required)" >&2
+        echo "$real md5 $actual != expected $expected" \
+             "(1017-patched chpasswd required for $arch)" >&2
         exit 1
       fi
       mkdir -p "${CRAFT_PART_INSTALL}/usr/sbin"
       cc -O2 -Wall -Wextra \
         -o "${CRAFT_PART_INSTALL}/usr/sbin/chpasswd" \
         "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd-guard.c"
-      install -Dm755 "${CRAFT_PROJECT_DIR}/chpasswd/chpasswd.real" \
+      install -Dm755 "${CRAFT_PROJECT_DIR}/chpasswd/$real" \
         "${CRAFT_PART_INSTALL}/usr/sbin/chpasswd.real"

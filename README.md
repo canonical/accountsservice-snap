@@ -39,7 +39,8 @@ dependencies belong to the consumer and are staged as proper archive debs:
   USE_EXTRAUSERS) is excluded from staging.
 - Layouts serve all of it at the daemon's compiled-in absolute paths
   inside its mount namespace (`/usr/sbin/adduser`, `/usr/bin/perl`,
-  `/usr/lib/x86_64-linux-gnu/perl-base`, `/usr/share/perl5`,
+  `/usr/lib/<triplet>/perl-base` (via `$CRAFT_ARCH_TRIPLET_BUILD_FOR`,
+  expanded at pack time), `/usr/share/perl5`,
   `/etc/adduser.conf` — bind-file/bind layouts; snap-update-ns creates
   missing mountpoints, including files, over the read-only base).
   Paths stay identical to what the fork's slot policy grants, so no
@@ -70,12 +71,24 @@ snap ships a validating shim:
   with exit 2 and a message on stderr; the daemon surfaces chpasswd
   failures to the D-Bus caller. Valid input is re-fed to the real chpasswd
   unchanged with the original argv and the child's exit status propagated.
-- The real chpasswd ships as `usr/sbin/chpasswd.real`: a byte-identical
-  copy of the fat base's 1017 extrausers-fallback binary (the same file the
-  variant rootfs bakes; md5 checked at build time). This preserves the
-  proven SetPassword chain (`chpasswd -e` → 1017 fallback → writes
-  `/var/lib/extrausers/shadow`), because the layout shadows the base's
-  `/usr/sbin/chpasswd` inside the namespace.
+- The real chpasswd ships as `usr/sbin/chpasswd.real`: a copy of the
+  1017 extrausers-fallback build (the same file the variant rootfs bakes;
+  per-arch md5 checked at build time). This preserves the proven SetPassword
+  chain (`chpasswd -e` → /etc lock failure on the RO base → 1017 fallback →
+  writes `/var/lib/extrausers/shadow`), because the layout shadows the base's
+  `/usr/sbin/chpasswd` inside the namespace. Per-arch builds of the same
+  patched source:
+  - amd64: the ucd-ppa `passwd_4.17.4-2ubuntu3+ucd1` deb output
+    (`chpasswd/chpasswd.real`).
+  - arm64: cross-built from the same ucd-ppa source tree (resolute shadow
+    4.17.4 + debian patch series + `1017_extrausers_chpasswd.patch`) with
+    `aarch64-linux-gnu-gcc` against resolute arm64 debs, configured with the
+    deb's own flags and LTO/hardening; symbol resolution matches the deb
+    (arc4random_buf/reallocarray from glibc, libbsd dropped) so the runtime
+    closure is identical (`libpam/libaudit/libselinux/libcrypt/libc`).
+    Verified end-to-end under qemu-user: RO-base lock failure → fallback →
+    hash written to `/var/lib/extrausers/shadow`, `/etc/shadow` untouched.
+    (`chpasswd/chpasswd.real-arm64`.)
 - No snapd policy change was needed: the fork's slot rule
   `/{,usr/}sbin/chpasswd ixr` matches the guard's namespace exec path, and
   the base template's exec grant on the snap's own install directory
