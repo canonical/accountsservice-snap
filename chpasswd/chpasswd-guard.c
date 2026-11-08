@@ -11,7 +11,7 @@
  *
  * Contract (the daemon's only use of chpasswd):
  *   argv:  <this program> -e
- *   stdin: exactly one "username:$6$salt$hash\n" record, newline-terminated.
+ *   stdin: exactly one "username:$<scheme>$salt$hash\n" record (any modular-crypt scheme: $6$ $y$ $5$ $1$ $2b$ $argon2id$...), newline-terminated.
  *
  * The guard reads stdin and validates the input against
  *   ^[A-Za-z0-9_.][A-Za-z0-9_.-]{0,31}:\$6\$[A-Za-z0-9./]+\$[A-Za-z0-9./]+\n$
@@ -59,7 +59,7 @@ static int reject(const char *reason)
     return 2;
 }
 
-/* username [$6$ salt $ hash], per the regex in the header comment. */
+/* username [$<scheme> salt $ hash], per the regex in the header comment. */
 static int valid_record(const char *line, size_t len)
 {
     const char *colon = memchr(line, ':', len);
@@ -77,22 +77,35 @@ static int valid_record(const char *line, size_t len)
 
     const char *rest = colon + 1;
     size_t rlen = len - ulen - 1;
-    if (rlen < 6)
+    if (rlen < 4 || rlen > 512)
         return 0;
-    if (rest[0] != '$' || rest[1] != '6' || rest[2] != '$')
+    if (rest[0] != '$')
         return 0;
 
-    size_t i = 3, salt = 0;
-    while (i < rlen && is_crypt(rest[i])) {
+    /* Modular-crypt scheme id: "$<id>$" — $6$ $y$ $5$ $1$ $2b$ $argon2id$...
+     * Any scheme is accepted: the guard validates record STRUCTURE (one
+     * record, no separator characters inside the hash), not algorithm
+     * policy. The real wizard caller hashes via glibc crypt() which
+     * defaults to yescrypt ($y$). */
+    size_t i = 1, idlen = 0;
+    while (i < rlen && is_user_first(rest[i])) {
         i++;
-        salt++;
+        idlen++;
     }
-    if (salt < 1 || i >= rlen || rest[i] != '$')
+    if (idlen < 1 || i >= rlen || rest[i] != '$')
+        return 0;
+    i++;
+    if (i >= rlen)
         return 0;
 
-    for (i++; i < rlen; i++)
-        if (!is_crypt(rest[i]))
+    /* Salt/parameters/hash remainder: the crypt alphabet plus argon2's
+     * '=', ',', '+' and '$' segment separators. Critically absent:
+     * ':', whitespace, control characters. */
+    for (; i < rlen; i++) {
+        if (!is_crypt(rest[i]) && rest[i] != '$' && rest[i] != '=' &&
+            rest[i] != ',' && rest[i] != '+')
             return 0;
+    }
     return 1; /* hash ran to the end of the line, non-empty */
 }
 
@@ -146,7 +159,7 @@ int main(int argc, char **argv)
     if (nl != 0)
         return reject("multiple records (newline in the crypt string)");
     if (!valid_record(buf, len - 1))
-        return reject("record does not match username:$6$salt$hash");
+        return reject("record does not match username:$<scheme>$salt$hash");
 
     const char *snap = getenv("SNAP");
     char real[4096];

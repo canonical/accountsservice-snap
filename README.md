@@ -64,7 +64,8 @@ snap ships a validating shim:
   snap, and a layout (`/usr/sbin/chpasswd: bind-file: $SNAP/usr/sbin/chpasswd`)
   puts it at the daemon's compiled-in helper path in its mount namespace.
 - The guard accepts ONLY `chpasswd -e` (the daemon's sole invocation shape)
-  and exactly one `username:$6$salt$hash` record (single line, newline
+  and exactly one `username:$<scheme>$salt$hash` record (any modular-crypt
+  scheme — the real wizard caller uses glibc yescrypt `$y$`; single line, newline
   terminated, no CR, valid SHA-512 crypt shape). Anything else is rejected
   with exit 2 and a message on stderr; the daemon surfaces chpasswd
   failures to the D-Bus caller. Valid input is re-fed to the real chpasswd
