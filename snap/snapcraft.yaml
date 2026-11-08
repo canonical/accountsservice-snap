@@ -82,7 +82,7 @@ layout:
   # "hash\notheruser:otherhash" would make chpasswd change a second
   # extrausers account in the same authorized call. Bind the validating guard
   # (chpasswd/chpasswd-guard.c) over that path in the daemon's namespace: it
-  # accepts exactly one username:$6$salt$hash record, rejects anything else
+  # accepts exactly one username:$<scheme>$salt$hash record (any modular-crypt scheme), rejects anything else
   # with exit 2 (the daemon surfaces chpasswd failures), then execs the snap's
   # byte-identical copy of the base's 1017-patched chpasswd
   # (usr/sbin/chpasswd.real), so the extrausers fallback chain is unchanged.
