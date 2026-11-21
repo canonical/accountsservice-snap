@@ -35,13 +35,14 @@ jobs:
           # build instance) - see snapcore/action-build ensureLXDNetwork.
           sudo iptables -P FORWARD ACCEPT
       - name: Build accountsservice snap
-        env:
-          SUFFIX: ${{ matrix.suffix }}
         run: |
           sudo snap install snapcraft --classic --channel=edge
           # Re-exec with fresh group membership so snapcraft can talk to
-          # the LXD socket (see action-build's sudo -u "$USER" -E pattern).
-          sudo -u "$USER" -E ./build-github.sh
+          # the LXD socket (see action-build's sudo -u "$USER" pattern).
+          # No -E and no step env: sudo in the 26.04 runner image ignores
+          # -E ("preserving the entire environment is not supported"), so
+          # build-github.sh derives the arch suffix from the packed snap.
+          sudo -u "$USER" ./build-github.sh
       - name: Publish to desktop-26-latest release
         if: github.event_name != 'pull_request'
         env:

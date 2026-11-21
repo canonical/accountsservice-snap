@@ -53,4 +53,13 @@ sed -i 's/^base: core26$/base: core26-desktop/' "$tmp/squashfs-root/meta/snap.ya
 mksquashfs "$tmp/squashfs-root" "$built" -noappend -comp xz -no-progress -xattrs
 rm -rf "$tmp"
 
-cp -f "$built" "accountsservice${SUFFIX:-}.snap"
+# The published asset is arch-suffixed ("" / "-arm64") because both legs
+# share the rolling desktop-26-latest release. Derive it from the packed
+# file rather than trusting an environment variable: sudo in the 26.04
+# runner image ignores -E ("preserving the entire environment is not
+# supported"), so SUFFIX never reached this script.
+case "$built" in
+    *_arm64.snap) suffix="-arm64" ;;
+    *) suffix="" ;;
+esac
+cp -f "$built" "accountsservice${suffix}.snap"
